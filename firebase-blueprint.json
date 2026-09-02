@@ -1,0 +1,47 @@
+{
+  "schema": {
+    "campaigns": {
+      "$campaignId": {
+        "name": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "applicants": {
+      "$applicantId": {
+        "campaignId": "string",
+        "fullName": "string",
+        "passport": "string",
+        "residence": "string",
+        "registration": "string",
+        "matchesResidence": "boolean",
+        "locality": "string",
+        "school": "string",
+        "certificateType": "string",
+        "certificateNumber": "string",
+        "issueDate": "string",
+        "grades": {
+          "threes": "number",
+          "fours": "number",
+          "fives": "number"
+        },
+        "averageScore": "number",
+        "specialty": "string",
+        "specialtyName": "string",
+        "fundingType": "string",
+        "programType": "string",
+        "benefit": "string",
+        "benefitEffect": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "documentTemplates": {
+      "$templateId": {
+        "id": "string",
+        "name": "string",
+        "fileName": "string",
+        "base64Data": "string",
+        "updatedAt": "number"
+      }
+    }
+  }
+}

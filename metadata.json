@@ -1,0 +1,8 @@
+{
+  "name": "Techturient",
+  "description": "Автоматизированная система приёмной комиссии Новосибирского электромеханического колледжа для управления базой абитуриентов.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
