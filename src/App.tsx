@@ -8,10 +8,11 @@ import { Campaigns } from './components/Campaigns';
 import { CampaignView } from './components/CampaignView';
 import { AddApplicant } from './components/AddApplicant';
 import { AuditLogsView } from './components/AuditLogsView';
+import { PublicRatingView } from './components/PublicRatingView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { toast } from './utils/toast';
 
-function AppRoutes() {
+function ProtectedApp() {
   const { user } = useAuth();
 
   if (!user) {
@@ -19,15 +20,25 @@ function AppRoutes() {
   }
 
   return (
+    <Routes>
+      <Route path="/" element={<DashboardLayout />}>
+        <Route index element={<Campaigns />} />
+        <Route path="campaign/:id" element={<CampaignView />} />
+        <Route path="campaign/:id/add" element={<AddApplicant />} />
+        <Route path="logs" element={<AuditLogsView />} />
+        <Route path="rating" element={<PublicRatingView />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
+function AppRoutes() {
+  return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<DashboardLayout />}>
-          <Route index element={<Campaigns />} />
-          <Route path="campaign/:id" element={<CampaignView />} />
-          <Route path="campaign/:id/add" element={<AddApplicant />} />
-          <Route path="logs" element={<AuditLogsView />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
+        <Route path="/rating" element={<PublicRatingView />} />
+        <Route path="/*" element={<ProtectedApp />} />
       </Routes>
     </BrowserRouter>
   );

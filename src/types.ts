@@ -125,6 +125,13 @@ export interface Applicant {
   documentsVerified?: boolean; // Галочка "Документы подтверждены"
   benefitEffect: string; // Что даёт (Целевое обучение, Первоочередное зачисление и т.д.)
 
+  // Индивидуальный код поступающего для публичного рейтинга
+  applicantCode?: string;
+
+  // Статусы подписи обязательных документов
+  dataProcessingConsentSigned?: boolean; // Согласие на обработку персональных данных (Обязательно для всех)
+  parentalConsentSigned?: boolean; // Заявление родителя / законного представителя (Обязательно при возрасте < 18 лет)
+
   // Индивидуальный реестр документов абитуриента
   documents?: ApplicantDocument[];
 

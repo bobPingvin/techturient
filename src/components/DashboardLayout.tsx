@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { GraduationCap, LogOut, FolderOpen, UserCheck, Shield, FileText, Settings as SettingsIcon, Clock } from 'lucide-react';
+import { GraduationCap, LogOut, FolderOpen, UserCheck, Shield, FileText, Settings as SettingsIcon, Clock, Award } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SettingsModal } from './SettingsModal';
 
@@ -29,6 +29,18 @@ export function DashboardLayout() {
             </Link>
             
             <div className="flex items-center gap-2 sm:gap-3">
+              <Link
+                to="/rating"
+                className={cn(
+                  "text-stone-700 hover:text-rose-700 hover:bg-rose-50 transition-colors px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-sm font-medium border border-stone-200 hover:border-rose-200 cursor-pointer shadow-2xs",
+                  location.pathname === '/rating' && "bg-rose-50 border-rose-300 text-rose-900 font-bold"
+                )}
+                title="Публичный рейтинг поступающих"
+              >
+                <Award className="w-4 h-4 text-amber-600" />
+                <span className="hidden md:inline">Рейтинг</span>
+              </Link>
+
               <Link
                 to="/logs"
                 className={cn(

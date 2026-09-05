@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { logAction } from '../lib/logger';
@@ -26,9 +26,15 @@ import {
   Calendar,
   BookOpen,
   Search,
-  Sparkles
+  Sparkles,
+  Download,
+  ExternalLink,
+  Share2,
+  FileCheck2,
+  Building2,
+  Clock
 } from 'lucide-react';
-import { Campaign, Relative, MilitaryRecord, ApplicantDocument } from '../types';
+import { Campaign, Relative, MilitaryRecord, ApplicantDocument, Applicant } from '../types';
 import { ApplicantDocumentsModal } from './ApplicantDocumentsModal';
 import { cleanFirestoreData } from '../lib/utils';
 import { toast } from '../utils/toast';
@@ -38,6 +44,11 @@ import {
   getBenefitDefinition, 
   isDocumentEligibleForBenefit 
 } from '../lib/benefits';
+import {
+  generateDataProcessingConsent,
+  generateParentalConsent,
+  calculateAge
+} from '../lib/documentGenerator';
 import {
   sanitizeSingleWord,
   isSingleWord,
@@ -63,7 +74,8 @@ export function AddApplicant() {
   
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [saving, setSaving] = useState(false);
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(1);
+  const [createdApplicant, setCreatedApplicant] = useState<Applicant | null>(null);
 
   // === ШАГ 1: Паспортные данные и номер телефона ===
   const [lastName, setLastName] = useState('');
@@ -524,6 +536,11 @@ export function AddApplicant() {
         // Воинский учёт
         militaryRecord,
 
+        // Индивидуальный код и подпись согласий
+        applicantCode: `REG-2026-${String(Math.floor(1000 + Math.random() * 9000))}`,
+        dataProcessingConsentSigned: false,
+        parentalConsentSigned: false,
+
         createdAt: Date.now(),
         applicationNumber: String(Math.floor(1000 + Math.random() * 9000)),
       });
@@ -533,16 +550,49 @@ export function AddApplicant() {
       await logAction(
         user?.username || 'nekpriem',
         'CREATE_APPLICANT',
-        `Зарегистрировал абитуриента: ${fullFio} (Заявление № ${applicantPayload.applicationNumber})`,
+        `Зарегистрировал абитуриента: ${fullFio} (Заявление № ${applicantPayload.applicationNumber}, Код: ${applicantPayload.applicantCode})`,
         { campaignId: id, applicantId: docRef.id }
       );
 
-      toast.success(`Абитуриент ${fullFio} успешно зарегистрирован (Заявление № ${applicantPayload.applicationNumber})`);
-      navigate(`/campaign/${id}`);
+      toast.success(`Абитуриент ${fullFio} успешно зарегистрирован!`);
+      
+      const createdObj = { id: docRef.id, ...applicantPayload } as Applicant;
+      setCreatedApplicant(createdObj);
+      setCurrentStep(8);
+      setSaving(false);
     } catch (err) {
       console.error('Error adding applicant:', err);
       alert('Ошибка при сохранении абитуриента в базу');
       setSaving(false);
+    }
+  };
+
+  // Toggle handlers for consents in Step 8
+  const handleToggleDataProcessingConsent = async (signed: boolean) => {
+    if (!createdApplicant?.id) return;
+    try {
+      await updateDoc(doc(db, 'applicants', createdApplicant.id), {
+        dataProcessingConsentSigned: signed,
+      });
+      setCreatedApplicant((prev) => prev ? { ...prev, dataProcessingConsentSigned: signed } : null);
+      toast.success(signed ? 'Согласие на обработку данных отмечено как подписанное' : 'Отметка о подписании согласия снята');
+    } catch (err) {
+      console.error('Error updating consent:', err);
+      toast.error('Не удалось обновить статус согласия');
+    }
+  };
+
+  const handleToggleParentalConsent = async (signed: boolean) => {
+    if (!createdApplicant?.id) return;
+    try {
+      await updateDoc(doc(db, 'applicants', createdApplicant.id), {
+        parentalConsentSigned: signed,
+      });
+      setCreatedApplicant((prev) => prev ? { ...prev, parentalConsentSigned: signed } : null);
+      toast.success(signed ? 'Заявление родителя отмечено как подписанное' : 'Отметка о подписании заявления родителя снята');
+    } catch (err) {
+      console.error('Error updating parental consent:', err);
+      toast.error('Не удалось обновить статус заявления родителя');
     }
   };
 
@@ -556,6 +606,7 @@ export function AddApplicant() {
     { number: 5, title: 'Воинский учёт', icon: Shield, optional: true },
     { number: 6, title: 'Специальность', icon: BookOpen },
     { number: 7, title: 'Льготы и документы', icon: Award },
+    { number: 8, title: 'Код и подпись', icon: FileCheck2 },
   ];
 
   return (
@@ -2040,12 +2091,318 @@ export function AddApplicant() {
                 ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5" />
-                    <span>Завершить и внести абитуриента в базу</span>
+                    <span>Завершить и перейти к формированию документов</span>
                   </>
                 )}
               </button>
             </div>
           </form>
+        )}
+
+        {/* ========================================================================= */}
+        {/* ШАГ 8: Документы на подпись и выдача индивидуального кода */}
+        {/* ========================================================================= */}
+        {currentStep === 8 && createdApplicant && (
+          <div className="p-6 md:p-8 space-y-8 animate-in fade-in duration-300">
+            {/* Header / Success Banner */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-emerald-950">
+                    Абитуриент успешно внесён в систему!
+                  </h3>
+                  <p className="text-sm text-emerald-800 mt-0.5">
+                    Заявление № {createdApplicant.applicationNumber} | {createdApplicant.fullName} | {createdApplicant.specialtyName || createdApplicant.specialty}
+                  </p>
+                </div>
+              </div>
+
+              <span className="text-xs font-bold px-3 py-1.5 bg-emerald-100 text-emerald-900 rounded-xl">
+                Завершающий шаг: Выдача кода и подпись документов
+              </span>
+            </div>
+
+            {/* Карточка 1: Индивидуальный шифр поступающего */}
+            <div className="bg-stone-900 text-white rounded-2xl p-6 space-y-4 shadow-md relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                <Shield className="w-48 h-48 text-white" />
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                <div>
+                  <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider mb-1">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Индивидуальный анонимный шифр абитуриента</span>
+                  </div>
+                  <h4 className="text-stone-300 text-xs">
+                    Для отслеживания своего текущего места в рейтинге на сайте без публикации ФИО
+                  </h4>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (createdApplicant.applicantCode) {
+                        navigator.clipboard.writeText(createdApplicant.applicantCode);
+                        toast.success('Индивидуальный код скопирован в буфер обмена!');
+                      }
+                    }}
+                    className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 border border-stone-700 cursor-pointer"
+                  >
+                    <span>Скопировать код</span>
+                  </button>
+                  <Link
+                    to={`/rating?code=${createdApplicant.applicantCode}`}
+                    target="_blank"
+                    className="px-4 py-2 bg-rose-800 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Открыть в рейтинге</span>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="bg-stone-950/80 p-4 rounded-xl border border-stone-800 flex items-center justify-between relative z-10">
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-stone-400 block font-semibold mb-0.5">
+                    Уникальный код для абитуриента:
+                  </span>
+                  <span className="text-3xl font-extrabold text-rose-400 font-mono tracking-widest">
+                    {createdApplicant.applicantCode}
+                  </span>
+                </div>
+                <div className="text-right text-xs text-stone-400 max-w-xs hidden sm:block">
+                  Выдайте этот код абитуриенту или родителю. Он используется для поиска своего заявления в публичных конкурсных списках.
+                </div>
+              </div>
+            </div>
+
+            {/* Карточка 2: Генерация и подписание документов в конце регистрационного цикла */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-rose-800" />
+                    Обязательные документы для подписания
+                  </h4>
+                  <p className="text-xs text-stone-500">
+                    Сформируйте бланки согласий в формате MS Word (.docx), распечатайте и отметьте статус подписания.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Согласие на обработку персональных данных */}
+                <div className={`p-5 rounded-2xl border transition-all space-y-4 ${
+                  createdApplicant.dataProcessingConsentSigned
+                    ? 'bg-emerald-50/50 border-emerald-300'
+                    : 'bg-white border-stone-200'
+                }`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-stone-100 text-stone-700 rounded-md">
+                        ФЗ №152-ФЗ
+                      </span>
+                      <h5 className="font-bold text-stone-900 text-sm mt-1.5">
+                        Согласие на обработку и хранение персональных данных
+                      </h5>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Обязательно для каждого абитуриента при подаче заявления в приёмную комиссию.
+                      </p>
+                    </div>
+
+                    {createdApplicant.dataProcessingConsentSigned ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg shrink-0">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                        Подписано
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 bg-amber-100 text-amber-900 rounded-lg shrink-0">
+                        <Clock className="w-3.5 h-3.5 text-amber-700" />
+                        Ожидает
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-stone-200/80 flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={() => generateDataProcessingConsent(createdApplicant)}
+                      className="w-full py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Download className="w-4 h-4 text-stone-300" />
+                      <span>Скачать бланк согласия (.docx)</span>
+                    </button>
+
+                    <label className="flex items-center gap-3 p-2.5 bg-stone-50 rounded-xl border border-stone-200 cursor-pointer hover:bg-stone-100 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={createdApplicant.dataProcessingConsentSigned || false}
+                        onChange={(e) => handleToggleDataProcessingConsent(e.target.checked)}
+                        className="w-4 h-4 text-emerald-600 rounded border-stone-300 focus:ring-emerald-600 accent-emerald-600"
+                      />
+                      <span className="text-xs font-semibold text-stone-800">
+                        Оригинал согласия подписан абитуриентом и сдан
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 2. Согласие родителя / законного представителя */}
+                {(() => {
+                  const age = calculateAge(createdApplicant.birthDate);
+                  const isMinor = age < 18;
+
+                  return (
+                    <div className={`p-5 rounded-2xl border transition-all space-y-4 ${
+                      !isMinor
+                        ? 'bg-stone-50 border-stone-200 opacity-80'
+                        : createdApplicant.parentalConsentSigned
+                        ? 'bg-emerald-50/50 border-emerald-300'
+                        : 'bg-amber-50/30 border-amber-200'
+                    }`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                            isMinor
+                              ? 'bg-rose-100 text-rose-900'
+                              : 'bg-stone-200 text-stone-700'
+                          }`}>
+                            Возраст: {age > 0 ? `${age} лет` : 'Не указан'} {isMinor ? '(Несовершеннолетний)' : '(Совершеннолетний)'}
+                          </span>
+                          <h5 className="font-bold text-stone-900 text-sm mt-1.5">
+                            Заявление законного представителя (Родителя / Опекуна)
+                          </h5>
+                          <p className="text-xs text-stone-500 mt-0.5">
+                            {isMinor
+                              ? 'Требуется для абитуриентов моложе 18 лет согласно законодательству РФ.'
+                              : 'Не требуется, так как абитуриент достиг 18-летнего возраста.'}
+                          </p>
+                        </div>
+
+                        {isMinor ? (
+                          createdApplicant.parentalConsentSigned ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg shrink-0">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                              Подписано
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 bg-amber-100 text-amber-900 rounded-lg shrink-0">
+                              <Clock className="w-3.5 h-3.5 text-amber-700" />
+                              Ожидает
+                            </span>
+                          )
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 bg-stone-200 text-stone-600 rounded-lg shrink-0">
+                            Не требуется
+                          </span>
+                        )}
+                      </div>
+
+                      {isMinor ? (
+                        <div className="pt-2 border-t border-stone-200/80 flex flex-col gap-3">
+                          <button
+                            type="button"
+                            onClick={() => generateParentalConsent(createdApplicant)}
+                            className="w-full py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                          >
+                            <Download className="w-4 h-4 text-stone-300" />
+                            <span>Скачать согласие родителя (.docx)</span>
+                          </button>
+
+                          <label className="flex items-center gap-3 p-2.5 bg-stone-50 rounded-xl border border-stone-200 cursor-pointer hover:bg-stone-100 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={createdApplicant.parentalConsentSigned || false}
+                              onChange={(e) => handleToggleParentalConsent(e.target.checked)}
+                              className="w-4 h-4 text-emerald-600 rounded border-stone-300 focus:ring-emerald-600 accent-emerald-600"
+                            />
+                            <span className="text-xs font-semibold text-stone-800">
+                              Оригинал согласия родителя подписан и сдан
+                            </span>
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="pt-2 border-t border-stone-200/80 text-xs text-stone-500">
+                          Поскольку абитуриент достиг совершеннолетия, подпись родителя не требуется.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Карточка 3: Чек-лист документов для очного визита & Контакты */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-5 bg-stone-50 rounded-2xl border border-stone-200 space-y-3">
+                <h5 className="text-xs font-bold uppercase tracking-wider text-stone-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Памятка для абитуриента (Что принести в колледж)
+                </h5>
+                <ul className="text-xs text-stone-700 space-y-2">
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-800 mt-1.5 shrink-0" />
+                    <span><strong>Оригинал документа об образовании</strong> (если подана копия)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-800 mt-1.5 shrink-0" />
+                    <span><strong>5 фотографии 3х4 см</strong> (цветные)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-800 mt-1.5 shrink-0" />
+                    <span><strong>Медицинская справка 086/у</strong></span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-800 mt-1.5 shrink-0" />
+                    <span>Подписанные заявления и согласия</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-800 mt-1.5 shrink-0" />
+                    <span>Копия паспорта и СНИЛС</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-5 bg-stone-50 rounded-2xl border border-stone-200 space-y-3">
+                <h5 className="text-xs font-bold uppercase tracking-wider text-stone-900 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-rose-800" />
+                  Контакты приёмной комиссии
+                </h5>
+                <div className="text-xs text-stone-700 space-y-2">
+                  <p><strong>Адрес:</strong> г. Новосибирск, ул. Первомайская, 202</p>
+                  <p><strong>Телефон:</strong> 8 (383) 337-23-27, 8 (383) 337-25-56</p>
+                  <p><strong>Режим работы:</strong> Пн–Пт: 09:00 – 16:00</p>
+                  <p><strong>Email:</strong> priem_nemk.2020@mail.ru</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions footer */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-stone-200">
+              <Link
+                to={`/rating?code=${createdApplicant.applicantCode}`}
+                target="_blank"
+                className="px-5 py-2.5 border border-stone-300 text-stone-800 hover:bg-stone-100 rounded-xl font-semibold text-sm transition-colors flex items-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4 text-stone-600" />
+                <span>Проверить абитуриента в публичном рейтинге</span>
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => navigate(`/campaign/${id}`)}
+                className="bg-rose-900 hover:bg-rose-950 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                <span>Завершить и перейти к списку абитуриентов</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         )}
 
       </div>

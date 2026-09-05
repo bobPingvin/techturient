@@ -29,7 +29,8 @@ import {
   Download,
   ChevronDown,
   FileSpreadsheet,
-  BarChart3
+  BarChart3,
+  Clock
 } from 'lucide-react';
 import { exportApplicantsToExcel, exportApplicantsToPDF } from '../utils/reportExporter';
 import { ApplicantDocumentsModal } from './ApplicantDocumentsModal';
@@ -39,12 +40,18 @@ import { EditSpecialtyModal } from './EditSpecialtyModal';
 import { DeleteApplicantModal } from './DeleteApplicantModal';
 import { EditPersonalModal } from './EditPersonalModal';
 import { EditAddressModal } from './EditAddressModal';
+import { EditConsentsModal } from './EditConsentsModal';
 import { ReportsModal } from './ReportsModal';
 import { displayRussianDate } from '../lib/validation';
 import { cleanFirestoreData } from '../lib/utils';
 import { toast } from '../utils/toast';
 import { FileCheck2, Copy } from 'lucide-react';
-import { generateEnrollmentApp } from '../lib/documentGenerator';
+import { 
+  generateEnrollmentApp,
+  generateDataProcessingConsent,
+  generateParentalConsent,
+  calculateAge
+} from '../lib/documentGenerator';
 import { formatSpecialtyDisplay } from '../lib/specialties';
 
 export function CampaignView() {
@@ -68,6 +75,7 @@ export function CampaignView() {
   const [isEditSpecialtyModalOpen, setIsEditSpecialtyModalOpen] = useState(false);
   const [isEditPersonalModalOpen, setIsEditPersonalModalOpen] = useState(false);
   const [isEditAddressModalOpen, setIsEditAddressModalOpen] = useState(false);
+  const [isEditConsentsModalOpen, setIsEditConsentsModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
 
@@ -367,6 +375,28 @@ export function CampaignView() {
       );
     } catch (e) {
       console.error('Error updating applicant address:', e);
+      throw e;
+    }
+  };
+
+  const handleSaveConsents = async (updatedFields: Partial<Applicant>) => {
+    if (!selectedApplicant) return;
+    const targetId = selectedApplicant.id;
+    try {
+      const cleanedPayload = cleanFirestoreData(updatedFields);
+      setApplicants(prev => prev.map(a => a.id === targetId ? { ...a, ...cleanedPayload } : a));
+      setSelectedApplicant(prev => prev && prev.id === targetId ? { ...prev, ...cleanedPayload } : prev);
+      await updateDoc(doc(db, 'applicants', targetId), cleanedPayload);
+      await logAction(
+        user?.username || 'nekpriem',
+        'UPDATE_APPLICANT',
+        `Обновил статусы сдачи согласий (152-ФЗ и согласие родителя) абитуриента: ${selectedApplicant.fullName}`,
+        { campaignId: id, applicantId: targetId }
+      );
+      toast.success('Статусы согласий и заявлений успешно обновлены');
+    } catch (e) {
+      console.error('Error updating applicant consents:', e);
+      toast.error('Не удалось обновить статусы согласий');
       throw e;
     }
   };
@@ -708,10 +738,43 @@ export function CampaignView() {
                     </td>
 
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-stone-100 text-stone-800 border border-stone-200">
-                        <FileText className="w-3 h-3 text-stone-600" />
-                        {applicant.documents?.length || (applicant.passportNumber ? 2 : 1)} док.
-                      </span>
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-stone-100 text-stone-800 border border-stone-200">
+                          <FileText className="w-3 h-3 text-stone-600" />
+                          {applicant.documents?.length || (applicant.passportNumber ? 2 : 1)} док.
+                        </span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {applicant.dataProcessingConsentSigned ? (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300" title="Согласие на обработку персональных данных (152-ФЗ) сдано">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                              ПД
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300" title="Согласие на обработку персональных данных (152-ФЗ) НЕ сдано">
+                              <Clock className="w-3 h-3 text-amber-700" />
+                              ПД?
+                            </span>
+                          )}
+
+                          {(() => {
+                            const age = calculateAge(applicant.birthDate);
+                            if (age > 0 && age < 18) {
+                              return applicant.parentalConsentSigned ? (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300" title="Согласие родителя сдано">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                  Род.
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300" title="Согласие родителя НЕ сдано">
+                                  <Clock className="w-3 h-3 text-amber-700" />
+                                  Род.?
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                      </div>
                     </td>
 
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -795,6 +858,20 @@ export function CampaignView() {
                 >
                   <FileText className="w-3.5 h-3.5" />
                   Скачать заявление (enrollApp.docx)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEditConsentsModalOpen(true)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                    selectedApplicant.dataProcessingConsentSigned
+                      ? 'bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100'
+                      : 'bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100'
+                  }`}
+                  title="Управление согласиями 152-ФЗ и родителя"
+                >
+                  <Shield className="w-3.5 h-3.5 text-stone-700" />
+                  <span>Согласие 152-ФЗ: {selectedApplicant.dataProcessingConsentSigned ? 'Сдано' : 'Ожидает'}</span>
                 </button>
                 <button
                   type="button"
@@ -1270,6 +1347,145 @@ export function CampaignView() {
                 )}
               </div>
 
+              {/* 8. Согласия на обработку персональных данных и заявления родителя */}
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-rose-900 flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-rose-800" />
+                    Статусы сдачи обязательных согласий (152-ФЗ и согласие родителя)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditConsentsModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-900 border border-stone-300 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    <Edit2 className="w-3.5 h-3.5 text-stone-700" />
+                    Редактировать согласия
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm bg-stone-50 p-4 rounded-xl border border-stone-200">
+                  {/* Согласие 152-ФЗ */}
+                  <div className={`p-3.5 rounded-xl border space-y-2 ${
+                    selectedApplicant.dataProcessingConsentSigned
+                      ? 'bg-emerald-50/70 border-emerald-300'
+                      : 'bg-amber-50/50 border-amber-200'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-stone-900 text-xs">
+                        1. Согласие на обработку ПД (152-ФЗ)
+                      </span>
+                      {selectedApplicant.dataProcessingConsentSigned ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-md">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                          Сдано
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md">
+                          <Clock className="w-3 h-3 text-amber-700" />
+                          Ожидает
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => generateDataProcessingConsent(selectedApplicant)}
+                        className="px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                        title="Скачать бланк согласия 152-ФЗ (.docx)"
+                      >
+                        <Download className="w-3 h-3 text-stone-300" />
+                        <span>Скачать (.docx)</span>
+                      </button>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-stone-800">
+                        <input
+                          type="checkbox"
+                          checked={selectedApplicant.dataProcessingConsentSigned || false}
+                          onChange={(e) => handleSaveConsents({ dataProcessingConsentSigned: e.target.checked })}
+                          className="w-4 h-4 text-emerald-600 rounded border-stone-300 focus:ring-emerald-600 accent-emerald-600"
+                        />
+                        <span>Сдано</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Согласие родителя */}
+                  {(() => {
+                    const age = calculateAge(selectedApplicant.birthDate);
+                    const isMinor = age < 18;
+
+                    return (
+                      <div className={`p-3.5 rounded-xl border space-y-2 ${
+                        !isMinor
+                          ? 'bg-stone-100/70 border-stone-200'
+                          : selectedApplicant.parentalConsentSigned
+                          ? 'bg-emerald-50/70 border-emerald-300'
+                          : 'bg-amber-50/50 border-amber-200'
+                      }`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-bold text-stone-900 text-xs block">
+                              2. Согласие родителя
+                            </span>
+                            <span className="text-[10px] text-stone-500 font-medium">
+                              Возраст: {age > 0 ? `${age} лет` : '—'} {isMinor ? '(< 18 лет)' : '(>= 18 лет)'}
+                            </span>
+                          </div>
+
+                          {isMinor ? (
+                            selectedApplicant.parentalConsentSigned ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-md">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                Сдано
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md">
+                                <Clock className="w-3 h-3 text-amber-700" />
+                                Ожидает
+                              </span>
+                            )
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 bg-stone-200 text-stone-600 rounded-md">
+                              Не треб.
+                            </span>
+                          )}
+                        </div>
+
+                        {isMinor ? (
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => generateParentalConsent(selectedApplicant)}
+                              className="px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                              title="Скачать согласие родителя (.docx)"
+                            >
+                              <Download className="w-3 h-3 text-stone-300" />
+                              <span>Скачать (.docx)</span>
+                            </button>
+
+                            <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-stone-800">
+                              <input
+                                type="checkbox"
+                                checked={selectedApplicant.parentalConsentSigned || false}
+                                onChange={(e) => handleSaveConsents({ parentalConsentSigned: e.target.checked })}
+                                className="w-4 h-4 text-emerald-600 rounded border-stone-300 focus:ring-emerald-600 accent-emerald-600"
+                              />
+                              <span>Сдано</span>
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-stone-500 pt-1">
+                            Совершеннолетний абитуриент.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
             </div>
 
             {/* Modal Footer */}
@@ -1353,6 +1569,16 @@ export function CampaignView() {
           onClose={() => setIsEditAddressModalOpen(false)}
           applicant={selectedApplicant}
           onSaveAddress={handleSaveAddress}
+        />
+      )}
+
+      {/* Edit Consents Modal */}
+      {selectedApplicant && (
+        <EditConsentsModal
+          isOpen={isEditConsentsModalOpen}
+          onClose={() => setIsEditConsentsModalOpen(false)}
+          applicant={selectedApplicant}
+          onSaveConsents={handleSaveConsents}
         />
       )}
 
