@@ -460,7 +460,7 @@ export function exportEnrollmentOrderToPDF(campaignName: string, applicants: App
     let enrolled = applicants.filter(a => a.educationDocumentSubmissionType !== 'copy');
     
     if (selectedSpecialtyFilter !== 'all') {
-      enrolled = enrolled.filter(a => (a.specialty === selectedSpecialtyFilter || a.specialtyCode === selectedSpecialtyFilter));
+      enrolled = enrolled.filter(a => (a.specialty === selectedSpecialtyFilter || a.specialtyName === selectedSpecialtyFilter));
     }
 
     if (enrolled.length === 0) {
@@ -623,7 +623,7 @@ export async function exportEnrollmentOrderToDocx(campaignName: string, applican
     let enrolled = applicants.filter(a => a.educationDocumentSubmissionType !== 'copy');
     
     if (selectedSpecialtyFilter !== 'all') {
-      enrolled = enrolled.filter(a => (a.specialty === selectedSpecialtyFilter || a.specialtyCode === selectedSpecialtyFilter));
+      enrolled = enrolled.filter(a => (a.specialty === selectedSpecialtyFilter || a.specialtyName === selectedSpecialtyFilter));
     }
 
     if (enrolled.length === 0) {
@@ -800,3 +800,226 @@ export async function exportEnrollmentOrderToDocx(campaignName: string, applican
     toast.error('Ошибка при создании приказа в формате Word.');
   }
 }
+
+/**
+ * Экспорт Ведомости обзвона и коммерческого набора в Excel (.xlsx)
+ */
+export async function exportCallSheetToExcel(campaignName: string, applicants: Applicant[]) {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Приёмная комиссия';
+    const worksheet = workbook.addWorksheet('Ведомость обзвона', {
+      views: [{ showGridLines: true }]
+    });
+
+    // 1. Главный заголовок
+    worksheet.mergeCells('A1:J1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = `ВЕДОМОСТЬ ОБЗВОНА И ЗАЧИСЛЕНИЯ ПЛАТНИКОВ / РЕЗЕРВА — ${(campaignName || 'ПРИЁМНАЯ КАМПАНИЯ').toUpperCase()}`;
+    titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF881337' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    worksheet.getRow(1).height = 34;
+
+    // 2. Метаданные
+    worksheet.mergeCells('A2:J2');
+    const subCell = worksheet.getCell('A2');
+    const nowStr = new Date().toLocaleDateString('ru-RU') + ' ' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    subCell.value = `Дата выгрузки: ${nowStr}  |  Всего в ведомости: ${applicants.length} чел.`;
+    subCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF44403C' } };
+    subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F4' } };
+    subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    worksheet.getRow(2).height = 22;
+
+    // 3. Шапка таблицы
+    const headers = [
+      '№',
+      'ФИО Абитуриента',
+      'Телефон',
+      'СНИЛС',
+      'Ср. балл',
+      'Основная специальность',
+      'Пожелания (Приоритеты 2 и 3)',
+      'Готов к коммерции',
+      'Статус звонка',
+      'Комментарий / Результат'
+    ];
+
+    const headerRow = worksheet.getRow(4);
+    headers.forEach((h, colIdx) => {
+      const cell = headerRow.getCell(colIdx + 1);
+      cell.value = h;
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF44403C' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+    headerRow.height = 28;
+
+    // 4. Данные
+    let currentIdx = 5;
+    applicants.forEach((a, i) => {
+      const row = worksheet.getRow(currentIdx);
+      
+      const statusText = 
+        a.callStatus === 'agreed_paid' ? '🟢 Согласен на договор' :
+        a.callStatus === 'agreed_budget' ? '🔵 Согласен на бюджет' :
+        a.callStatus === 'thinking' ? '🟡 В раздумьях / Перезвонить' :
+        a.callStatus === 'refused' ? '🔴 Отказ от поступления' :
+        a.callStatus === 'unreachable' ? '🟣 Не дозвонились' : '⚪ Не звонили';
+
+      const altSpecsText = a.alternativeSpecialties && a.alternativeSpecialties.length > 0
+        ? a.alternativeSpecialties.join('; ')
+        : 'Нет';
+
+      row.values = [
+        i + 1,
+        a.fullName,
+        a.phone || '—',
+        a.snils || '—',
+        a.averageScore ? Number(a.averageScore.toFixed(2)) : 0,
+        formatSpecialtyDisplay(a.specialty, a.specialtyName),
+        altSpecsText,
+        a.commercialInterest ? 'Да (Договор)' : 'Только бюджет',
+        statusText,
+        a.callNote || ''
+      ];
+
+      // Styling
+      row.getCell(1).alignment = { horizontal: 'center' };
+      row.getCell(3).alignment = { horizontal: 'center' };
+      row.getCell(4).alignment = { horizontal: 'center' };
+      row.getCell(5).alignment = { horizontal: 'center' };
+      row.getCell(8).alignment = { horizontal: 'center' };
+      row.getCell(9).alignment = { horizontal: 'center' };
+
+      // Borders
+      for (let c = 1; c <= 10; c++) {
+        row.getCell(c).border = {
+          top: { style: 'thin', color: { argb: 'FFE7E5E4' } },
+          bottom: { style: 'thin', color: { argb: 'FFE7E5E4' } },
+          left: { style: 'thin', color: { argb: 'FFE7E5E4' } },
+          right: { style: 'thin', color: { argb: 'FFE7E5E4' } }
+        };
+      }
+
+      currentIdx++;
+    });
+
+    // Column widths
+    worksheet.columns = [
+      { width: 6 },
+      { width: 32 },
+      { width: 18 },
+      { width: 16 },
+      { width: 12 },
+      { width: 35 },
+      { width: 35 },
+      { width: 18 },
+      { width: 26 },
+      { width: 30 }
+    ];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), `Vedomost_Obzvona_${campaignName.replace(/\s+/g, '_')}.xlsx`);
+    toast.success('Ведомость обзвона успешно экспортирована в Excel!');
+  } catch (err) {
+    console.error('Failed to export call sheet Excel:', err);
+    toast.error('Ошибка при экспорте ведомости обзвона в Excel.');
+  }
+}
+
+/**
+ * Печать Листа обзвона в PDF
+ */
+export function exportCallSheetToPDF(campaignName: string, applicants: Applicant[]) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    toast.error('Не удалось открыть окно печати. Разрешите всплывающие окна.');
+    return;
+  }
+
+  const dateStr = new Date().toLocaleDateString('ru-RU');
+
+  const rowsHtml = applicants.map((a, i) => {
+    const altSpecsText = a.alternativeSpecialties && a.alternativeSpecialties.length > 0
+      ? a.alternativeSpecialties.join('<br>')
+      : '<span style="color: #a8a29e;">—</span>';
+
+    return `
+      <tr>
+        <td style="text-align: center; font-weight: bold;">${i + 1}</td>
+        <td>
+          <strong>${a.fullName}</strong><br>
+          <span style="font-family: monospace; color: #881337; font-weight: bold;">📞 ${a.phone || 'Нет телефона'}</span>
+        </td>
+        <td style="text-align: center; font-weight: bold; font-size: 11px;">
+          ${a.averageScore ? a.averageScore.toFixed(2) : '0.00'}
+        </td>
+        <td>
+          <div style="font-weight: bold; color: #1c1917;">1. ${formatSpecialtyDisplay(a.specialty, a.specialtyName)}</div>
+          <div style="font-size: 10px; color: #57534e; margin-top: 2px;">${altSpecsText}</div>
+        </td>
+        <td style="text-align: center; font-size: 10px;">
+          ${a.commercialInterest ? '<strong style="color: #065f46;">Да (Договор)</strong>' : 'Только бюджет'}
+        </td>
+        <td style="text-align: center;">
+          <div style="font-size: 10px; font-weight: bold;">${a.callStatus ? a.callStatus : 'Не звонили'}</div>
+        </td>
+        <td style="font-size: 10px;">${a.callNote || ''}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="UTF-8">
+      <title>ЛИСТ ОБЗВОНА И ЗАЧИСЛЕНИЯ ПЛАТНИКОВ — ${campaignName}</title>
+      <style>
+        body { font-family: 'Times New Roman', serif; margin: 20px; color: #1c1917; font-size: 11pt; }
+        .header { text-align: center; border-bottom: 2px solid #881337; padding-bottom: 10px; margin-bottom: 15px; }
+        .header h1 { margin: 0; font-size: 16pt; color: #881337; text-transform: uppercase; }
+        .header p { margin: 4px 0 0 0; font-size: 10pt; color: #57534e; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #78716c; padding: 6px 8px; vertical-align: top; text-align: left; }
+        th { background-color: #f5f5f4; font-size: 10pt; text-align: center; font-weight: bold; }
+        @media print {
+          body { margin: 0; }
+          button { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>ВЕДОМОСТЬ ОБЗВОНА АБИТУРИЕНТОВ И ЗАЧИСЛЕНИЯ ПЛАТНИКОВ</h1>
+        <p>Приёмная кампания: <strong>${campaignName}</strong> | Дата: <strong>${dateStr}</strong> | Количество: <strong>${applicants.length} чел.</strong></p>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 25px;">№</th>
+            <th style="width: 200px;">ФИО Абитуриента и Телефон</th>
+            <th style="width: 50px;">Ср. бал</th>
+            <th>Основная & Альтернативные специальности</th>
+            <th style="width: 70px;">Договор</th>
+            <th style="width: 100px;">Статус звонка</th>
+            <th>Заметка / Результат разговора</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => {
+    printWindow.print();
+  }, 400);
+}
+

@@ -1,8 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Campaign, Applicant } from '../types';
-import { exportApplicantsToExcel, exportApplicantsToPDF, exportEnrollmentOrderToPDF, exportEnrollmentOrderToDocx } from '../utils/reportExporter';
+import { 
+  exportApplicantsToExcel, 
+  exportApplicantsToPDF, 
+  exportEnrollmentOrderToPDF, 
+  exportEnrollmentOrderToDocx,
+  exportCallSheetToExcel,
+  exportCallSheetToPDF
+} from '../utils/reportExporter';
 import { SPECIALTY_LIST, formatSpecialtyDisplay } from '../lib/specialties';
-import { X, FileText, Printer, Download, BarChart3, Users, Award, Shield, CheckCircle2, Building, Calendar, Layers, Filter, FileCheck } from 'lucide-react';
+import { X, FileText, Printer, Download, BarChart3, Users, Award, Shield, CheckCircle2, Building, Calendar, Layers, Filter, FileCheck, PhoneCall } from 'lucide-react';
 
 interface ReportsModalProps {
   isOpen: boolean;
@@ -42,9 +49,8 @@ export function ReportsModal({
     return applicants.filter(a => {
       // 1. Фильтр по специальности
       if (selectedSpecialtyFilter !== 'all') {
-        const matchesCode = a.specialtyCode === selectedSpecialtyFilter;
-        const matchesSpec = a.specialty === selectedSpecialtyFilter;
-        if (!matchesCode && !matchesSpec) return false;
+        const matchesSpec = a.specialty === selectedSpecialtyFilter || a.specialtyName === selectedSpecialtyFilter;
+        if (!matchesSpec) return false;
       }
 
       // 2. Фильтр по дате создания
@@ -590,7 +596,7 @@ export function ReportsModal({
                 </div>
 
                 {/* 2. Кнопки действия */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
                   <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 flex flex-col justify-between space-y-3">
                     <div>
                       <h5 className="font-bold text-emerald-950 text-sm">Таблица Excel (.xlsx)</h5>
@@ -637,6 +643,21 @@ export function ReportsModal({
                     >
                       <Download className="w-4 h-4" />
                       <span>Скачать Приказ (.docx)</span>
+                    </button>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 flex flex-col justify-between space-y-3">
+                    <div>
+                      <h5 className="font-bold text-purple-950 text-sm">Ведомость обзвона и договорников</h5>
+                      <p className="text-xs text-purple-900 mt-0.5">Список абитуриентов с телефонами, альтернативными пожеланиями и договором</p>
+                    </div>
+                    <button
+                      onClick={() => exportCallSheetToExcel(campaign?.name || 'Приёмная кампания', filteredApplicants)}
+                      disabled={filteredApplicants.length === 0}
+                      className="w-full py-2.5 bg-purple-800 hover:bg-purple-900 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                    >
+                      <PhoneCall className="w-4 h-4" />
+                      <span>Ведомость с телефонами (Excel)</span>
                     </button>
                   </div>
                 </div>

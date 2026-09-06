@@ -114,6 +114,13 @@ export interface Applicant {
   fundingType?: 'Бюджет' | 'Платно' | string;
   programType?: 'ППССЗ' | 'ППКРС' | string;
 
+  // Альтернативные пожелания по специальностям и коммерческое зачисление (Обзвон)
+  alternativeSpecialties?: string[]; // Пожелания на другие специальности (приоритеты 2, 3 и т.д.)
+  commercialInterest?: boolean; // Готовность учиться по договору на платной основе
+  callStatus?: 'not_called' | 'agreed_paid' | 'agreed_budget' | 'thinking' | 'refused' | 'unreachable' | string; // Статус обзвона
+  callNote?: string; // Комментарий / результат разговора при обзвоне
+  callUpdatedAt?: number; // Дата/время обновления статуса обзвона
+
   // Льготы и документы подтверждения
   hasBenefit?: boolean;
   benefit: string; // Категория льготы

@@ -30,7 +30,9 @@ import {
   ChevronDown,
   FileSpreadsheet,
   BarChart3,
-  Clock
+  Clock,
+  PhoneCall,
+  Layers
 } from 'lucide-react';
 import { exportApplicantsToExcel, exportApplicantsToPDF } from '../utils/reportExporter';
 import { ApplicantDocumentsModal } from './ApplicantDocumentsModal';
@@ -42,6 +44,7 @@ import { EditPersonalModal } from './EditPersonalModal';
 import { EditAddressModal } from './EditAddressModal';
 import { EditConsentsModal } from './EditConsentsModal';
 import { ReportsModal } from './ReportsModal';
+import { CommercialCallModal } from './CommercialCallModal';
 import { displayRussianDate } from '../lib/validation';
 import { cleanFirestoreData } from '../lib/utils';
 import { toast } from '../utils/toast';
@@ -77,6 +80,7 @@ export function CampaignView() {
   const [isEditAddressModalOpen, setIsEditAddressModalOpen] = useState(false);
   const [isEditConsentsModalOpen, setIsEditConsentsModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
+  const [isCommercialCallModalOpen, setIsCommercialCallModalOpen] = useState(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
 
   useEffect(() => {
@@ -564,6 +568,16 @@ export function CampaignView() {
             )}
           </div>
 
+          <button
+            type="button"
+            onClick={() => setIsCommercialCallModalOpen(true)}
+            className="bg-emerald-800 hover:bg-emerald-900 text-white px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+            title="Открыть ведомость обзвона и управления коммерческим набором"
+          >
+            <PhoneCall className="w-4 h-4 text-emerald-300" />
+            <span>Обзвон платников и резерва</span>
+          </button>
+
           <Link 
             to={`/campaign/${id}/add`}
             className="bg-rose-900 hover:bg-rose-950 active:bg-rose-950 text-white px-4 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2 shadow-sm cursor-pointer"
@@ -699,6 +713,12 @@ export function CampaignView() {
                               {applicant.programType === 'ППКРС' ? 'ППКРС' : 'ППССЗ'}
                             </span>
                           </div>
+                          {applicant.alternativeSpecialties && applicant.alternativeSpecialties.length > 0 && (
+                            <div className="text-[10px] text-stone-500 flex items-center gap-1 truncate" title={`Запасные специальности: ${applicant.alternativeSpecialties.join(', ')}`}>
+                              <Layers className="w-3 h-3 text-stone-400 shrink-0" />
+                              <span className="truncate">Запас: {applicant.alternativeSpecialties.join('; ')}</span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-stone-400">Не указана</span>
@@ -1599,6 +1619,14 @@ export function CampaignView() {
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
         campaign={campaign}
+        applicants={applicants}
+      />
+
+      {/* Commercial Call & Reserves Modal */}
+      <CommercialCallModal
+        isOpen={isCommercialCallModalOpen}
+        onClose={() => setIsCommercialCallModalOpen(false)}
+        campaignName={campaign?.name || 'Приёмная кампания'}
         applicants={applicants}
       />
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { collection, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, getDocs, query, where, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { logAction } from '../lib/logger';
@@ -32,7 +32,8 @@ import {
   Share2,
   FileCheck2,
   Building2,
-  Clock
+  Clock,
+  Layers
 } from 'lucide-react';
 import { Campaign, Relative, MilitaryRecord, ApplicantDocument, Applicant } from '../types';
 import { ApplicantDocumentsModal } from './ApplicantDocumentsModal';
@@ -123,6 +124,9 @@ export function AddApplicant() {
 
   // === ШАГ 6: Выбор специальности / профессии (образовательной программы) ===
   const [selectedSpecialty, setSelectedSpecialty] = useState('Электроснабжение (Бюджет)');
+  const [secondChoiceSpecialty, setSecondChoiceSpecialty] = useState('');
+  const [thirdChoiceSpecialty, setThirdChoiceSpecialty] = useState('');
+  const [commercialInterest, setCommercialInterest] = useState(false);
   const [specialtyFundingFilter, setSpecialtyFundingFilter] = useState<'all' | 'Бюджет' | 'Платно'>('all');
   const [specialtyTypeFilter, setSpecialtyTypeFilter] = useState<'all' | 'ППССЗ' | 'ППКРС'>('all');
   const [specialtySearch, setSpecialtySearch] = useState('');
@@ -516,6 +520,14 @@ export function AddApplicant() {
         fundingType: specObj?.funding || 'Бюджет',
         programType: specObj?.programType || 'ППССЗ',
 
+        // Пожелания на альтернативные специальности и коммерция
+        alternativeSpecialties: [secondChoiceSpecialty, thirdChoiceSpecialty].filter(
+          (s) => s && s.trim() !== '' && s !== selectedSpecialty
+        ),
+        commercialInterest,
+        callStatus: 'not_called',
+        callNote: '',
+
         // Льготы
         hasBenefit,
         benefit: hasBenefit ? benefit : '',
@@ -545,8 +557,105 @@ export function AddApplicant() {
         applicationNumber: String(Math.floor(1000 + Math.random() * 9000)),
       });
 
-      const docRef = await addDoc(collection(db, 'applicants'), applicantPayload);
       const fullFio = `${lastName.trim()} ${firstName.trim()} ${middleName.trim()}`.trim();
+
+      // 1. Если абитуриент УЖЕ был создан в текущей сессии формы (например, пользователь перешёл на Шаг 8, затем вернулся назад изменить данные)
+      if (createdApplicant?.id) {
+        const updatePayload = cleanFirestoreData({
+          ...applicantPayload,
+          applicationNumber: createdApplicant.applicationNumber,
+          applicantCode: createdApplicant.applicantCode,
+          dataProcessingConsentSigned: createdApplicant.dataProcessingConsentSigned || false,
+          parentalConsentSigned: createdApplicant.parentalConsentSigned || false,
+          createdAt: createdApplicant.createdAt || Date.now(),
+        });
+
+        await updateDoc(doc(db, 'applicants', createdApplicant.id), updatePayload);
+        await logAction(
+          user?.username || 'nekpriem',
+          'UPDATE_APPLICANT',
+          `Обновил данные абитуриента: ${fullFio} (Заявление № ${createdApplicant.applicationNumber})`,
+          { campaignId: id, applicantId: createdApplicant.id }
+        );
+
+        toast.success(`Данные абитуриента ${fullFio} обновлены!`);
+        const updatedObj = { id: createdApplicant.id, ...updatePayload } as Applicant;
+        setCreatedApplicant(updatedObj);
+        setCurrentStep(8);
+        setSaving(false);
+        return;
+      }
+
+      // 2. Проверка на дубликаты в базе по Паспорту (серия + номер) или СНИЛС в рамках этой кампании
+      const pSeries = passportSeries.trim();
+      const pNum = passportNumber.trim();
+      const qPassport = query(
+        collection(db, 'applicants'),
+        where('campaignId', '==', id),
+        where('passportSeries', '==', pSeries),
+        where('passportNumber', '==', pNum)
+      );
+      const passportSnap = await getDocs(qPassport);
+
+      let existingDocId: string | null = null;
+      let existingData: any = null;
+
+      if (!passportSnap.empty) {
+        existingDocId = passportSnap.docs[0].id;
+        existingData = passportSnap.docs[0].data();
+      } else if (snils.trim()) {
+        const qSnils = query(
+          collection(db, 'applicants'),
+          where('campaignId', '==', id),
+          where('snils', '==', snils.trim())
+        );
+        const snilsSnap = await getDocs(qSnils);
+        if (!snilsSnap.empty) {
+          existingDocId = snilsSnap.docs[0].id;
+          existingData = snilsSnap.docs[0].data();
+        }
+      }
+
+      if (existingDocId && existingData) {
+        const confirmUpdate = window.confirm(
+          `Внимание! Абитуриент с данными паспорта (${pSeries} ${pNum}) или СНИЛС уже зарегистрирован в этой приёмной кампании:\n` +
+          `• ФИО: ${existingData.fullName}\n` +
+          `• № Заявления: ${existingData.applicationNumber}\n\n` +
+          `Обновить данные существующего заявления вместо создания повторного дубликата?`
+        );
+
+        if (!confirmUpdate) {
+          setSaving(false);
+          return;
+        }
+
+        const updatePayload = cleanFirestoreData({
+          ...applicantPayload,
+          applicationNumber: existingData.applicationNumber,
+          applicantCode: existingData.applicantCode,
+          dataProcessingConsentSigned: existingData.dataProcessingConsentSigned || false,
+          parentalConsentSigned: existingData.parentalConsentSigned || false,
+          createdAt: existingData.createdAt || Date.now(),
+        });
+
+        await updateDoc(doc(db, 'applicants', existingDocId), updatePayload);
+        await logAction(
+          user?.username || 'nekpriem',
+          'UPDATE_APPLICANT',
+          `Обновил существующее заявление (дубликат предотвращён): ${fullFio} (Заявление № ${existingData.applicationNumber})`,
+          { campaignId: id, applicantId: existingDocId }
+        );
+
+        toast.success(`Заявление абитуриента ${fullFio} обновлено!`);
+        const updatedObj = { id: existingDocId, ...updatePayload } as Applicant;
+        setCreatedApplicant(updatedObj);
+        setCurrentStep(8);
+        setSaving(false);
+        return;
+      }
+
+      // 3. Создание нового абитуриента в базе
+      const docRef = await addDoc(collection(db, 'applicants'), applicantPayload);
       await logAction(
         user?.username || 'nekpriem',
         'CREATE_APPLICANT',
@@ -1783,6 +1892,84 @@ export function AddApplicant() {
                   <div className="p-8 text-center bg-stone-50 rounded-2xl border border-stone-200 text-stone-500 text-sm">
                     По заданным критериям специальности не найдены
                   </div>
+                )}
+              </div>
+
+              {/* Альтернативные пожелания по специальностям */}
+              <div className="p-5 bg-stone-50 rounded-2xl border border-stone-200 space-y-4">
+                <div className="flex items-center gap-2 font-bold text-stone-900 text-sm pb-2 border-b border-stone-200">
+                  <Layers className="w-4 h-4 text-rose-800" />
+                  <span>Пожелания на другие специальности (Приоритеты 2 и 3) и коммерческий набор</span>
+                </div>
+
+                <label className="flex items-start gap-3 p-3.5 bg-white rounded-xl border border-stone-200 cursor-pointer select-none hover:bg-stone-50 transition-colors shadow-2xs">
+                  <input
+                    type="checkbox"
+                    checked={commercialInterest}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setCommercialInterest(checked);
+                      if (!checked) {
+                        setSecondChoiceSpecialty('');
+                        setThirdChoiceSpecialty('');
+                      }
+                    }}
+                    className="mt-0.5 w-4 h-4 text-rose-800 rounded border-stone-300 focus:ring-rose-800 accent-rose-800 cursor-pointer shrink-0"
+                  />
+                  <div>
+                    <span className="font-bold text-xs text-stone-900 block">
+                      Рассматривать альтернативные специальности и платное (договорное) обучение
+                    </span>
+                    <span className="text-[11px] text-stone-500 font-normal leading-relaxed block mt-0.5">
+                      Включает абитуриента в ведомость обзвона и резерв, а также открывает доступ к выбору 2-го и 3-го приоритетов специальностей.
+                    </span>
+                  </div>
+                </label>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">
+                      2-й приоритет (Альтернативная специальность):
+                    </label>
+                    <select
+                      value={secondChoiceSpecialty}
+                      onChange={(e) => setSecondChoiceSpecialty(e.target.value)}
+                      disabled={!commercialInterest}
+                      className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
+                    >
+                      <option value="">{commercialInterest ? '-- Не выбрано --' : '-- Отключено (включите галочку выше) --'}</option>
+                      {SPECIALTY_LIST.filter(s => s.fullName !== selectedSpecialty).map(s => (
+                        <option key={s.id} value={s.fullName}>
+                          {s.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">
+                      3-й приоритет (Альтернативная специальность):
+                    </label>
+                    <select
+                      value={thirdChoiceSpecialty}
+                      onChange={(e) => setThirdChoiceSpecialty(e.target.value)}
+                      disabled={!commercialInterest}
+                      className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
+                    >
+                      <option value="">{commercialInterest ? '-- Не выбрано --' : '-- Отключено (включите галочку выше) --'}</option>
+                      {SPECIALTY_LIST.filter(s => s.fullName !== selectedSpecialty && s.fullName !== secondChoiceSpecialty).map(s => (
+                        <option key={s.id} value={s.fullName}>
+                          {s.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {!commercialInterest && (
+                  <p className="text-[11px] text-amber-800 font-medium bg-amber-50 p-2.5 rounded-xl border border-amber-200/80">
+                    💡 Чтобы указать 2-й и 3-й приоритеты специальностей, установите галочку разрешения выше.
+                  </p>
                 )}
               </div>
 

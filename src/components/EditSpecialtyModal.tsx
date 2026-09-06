@@ -39,6 +39,9 @@ export function EditSpecialtyModal({
   }, [isOpen]);
 
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>(applicant.specialty || '');
+  const [secondSpecialty, setSecondSpecialty] = useState<string>(applicant.alternativeSpecialties?.[0] || '');
+  const [thirdSpecialty, setThirdSpecialty] = useState<string>(applicant.alternativeSpecialties?.[1] || '');
+  const [commercialInterest, setCommercialInterest] = useState<boolean>(applicant.commercialInterest ?? false);
   const [filterFunding, setFilterFunding] = useState<'all' | 'Бюджет' | 'Платно'>('all');
   const [filterProgramType, setFilterProgramType] = useState<'all' | 'ППССЗ' | 'ППКРС'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,6 +50,9 @@ export function EditSpecialtyModal({
   useEffect(() => {
     if (isOpen) {
       setSelectedSpecialty(applicant.specialty || '');
+      setSecondSpecialty(applicant.alternativeSpecialties?.[0] || '');
+      setThirdSpecialty(applicant.alternativeSpecialties?.[1] || '');
+      setCommercialInterest(applicant.commercialInterest ?? false);
       setSearchQuery('');
       setFilterFunding('all');
       setFilterProgramType('all');
@@ -86,12 +92,18 @@ export function EditSpecialtyModal({
 
     setIsSubmitting(true);
 
+    const alternativeSpecialties = [secondSpecialty, thirdSpecialty].filter(
+      (s) => s && s.trim() !== '' && s !== selectedSpecialty
+    );
+
     try {
       await onSaveSpecialty({
         specialty: selectedSpecialty,
         specialtyName,
         fundingType,
-        programType
+        programType,
+        alternativeSpecialties,
+        commercialInterest
       });
       onClose();
     } catch (err) {
@@ -297,6 +309,80 @@ export function EditSpecialtyModal({
               <div className="p-8 text-center bg-stone-50 rounded-xl border border-stone-200 text-stone-500 text-xs">
                 По выбранным фильтрам специальностей не найдено
               </div>
+            )}
+          </div>
+
+          {/* Альтернативные специальности (Пожелания / Приоритеты 2 и 3) */}
+          <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-3 text-xs">
+            <div className="flex items-center gap-2 font-bold text-stone-900 text-sm pb-2 border-b border-stone-200">
+              <Layers className="w-4 h-4 text-rose-800" />
+              <span>Пожелания на другие специальности (Приоритеты 2 и 3) и коммерческий набор</span>
+            </div>
+
+            <label className="flex items-start gap-2.5 p-3 bg-white rounded-xl border border-stone-200 cursor-pointer select-none hover:bg-stone-50 transition-colors shadow-2xs">
+              <input
+                type="checkbox"
+                checked={commercialInterest}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setCommercialInterest(checked);
+                  if (!checked) {
+                    setSecondSpecialty('');
+                    setThirdSpecialty('');
+                  }
+                }}
+                className="mt-0.5 w-4 h-4 text-rose-800 rounded border-stone-300 focus:ring-rose-800 accent-rose-800 cursor-pointer shrink-0"
+              />
+              <div>
+                <span className="font-bold text-stone-800 text-xs block">
+                  Рассматривать альтернативные специальности и платное (договорное) обучение
+                </span>
+                <span className="text-[11px] text-stone-500 font-normal block mt-0.5">
+                  Включает абитуриента в ведомость обзвона и резерв, а также открывает выбор 2-го и 3-го приоритетов специальностей.
+                </span>
+              </div>
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">2-й приоритет (Запасная специальность):</label>
+                <select
+                  value={secondSpecialty}
+                  onChange={(e) => setSecondSpecialty(e.target.value)}
+                  disabled={!commercialInterest}
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
+                >
+                  <option value="">{commercialInterest ? '-- Не выбрано --' : '-- Отключено (включите галочку выше) --'}</option>
+                  {SPECIALTY_LIST.filter(s => s.fullName !== selectedSpecialty).map(s => (
+                    <option key={s.id} value={s.fullName}>
+                      {s.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">3-й приоритет (Запасная специальность):</label>
+                <select
+                  value={thirdSpecialty}
+                  onChange={(e) => setThirdSpecialty(e.target.value)}
+                  disabled={!commercialInterest}
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
+                >
+                  <option value="">{commercialInterest ? '-- Не выбрано --' : '-- Отключено (включите галочку выше) --'}</option>
+                  {SPECIALTY_LIST.filter(s => s.fullName !== selectedSpecialty && s.fullName !== secondSpecialty).map(s => (
+                    <option key={s.id} value={s.fullName}>
+                      {s.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {!commercialInterest && (
+              <p className="text-[11px] text-amber-800 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
+                💡 Чтобы добавить 2-й и 3-й приоритеты, установите галочку разрешения выше.
+              </p>
             )}
           </div>
 
