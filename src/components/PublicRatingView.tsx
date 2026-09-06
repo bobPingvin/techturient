@@ -112,14 +112,118 @@ export function PublicRatingView() {
     return Array.from(setSpecs);
   }, [campaignApplicants]);
 
-  // Chart data for Pie Chart: distribution by specialty
+  // Chart data for Pie Chart: dynamic based on selected specialty
   const pieChartData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    campaignApplicants.forEach(a => {
-      const label = formatSpecialtyDisplay(a.specialty, a.specialtyName);
-      counts[label] = (counts[label] || 0) + 1;
+    if (selectedSpecialty === 'all') {
+      // Distribution by specialty across all applicants
+      const counts: Record<string, { fullName: string; shortName: string; count: number }> = {};
+      campaignApplicants.forEach(a => {
+        const fullLabel = formatSpecialtyDisplay(a.specialty, a.specialtyName);
+        const specObj = getSpecialtyByFullName(a.specialty);
+        const code = specObj?.code || '';
+
+        let shortName = fullLabel;
+        if (code === '13.02.07') shortName = '13.02.07 Электроснабжение';
+        else if (code === '13.02.13') shortName = '13.02.13 Эл. оборудование';
+        else if (code === '09.02.11') shortName = '09.02.11 Разработка ПО';
+        else if (code === '23.02.04') shortName = '23.02.04 Техн. экспл. машин';
+        else if (code === '13.01.10') shortName = '13.01.10 Электромонтер';
+        else if (fullLabel.length > 25) {
+          shortName = fullLabel.slice(0, 22) + '...';
+        }
+
+        if (!counts[fullLabel]) {
+          counts[fullLabel] = { fullName: fullLabel, shortName, count: 0 };
+        }
+        counts[fullLabel].count += 1;
+      });
+
+      return Object.values(counts).map(item => ({
+        name: item.shortName,
+        fullName: item.fullName,
+        value: item.count
+      }));
+    } else {
+      // Distribution by document type for the selected specialty
+      const specObj = getSpecialtyByFullName(selectedSpecialty);
+      const filtered = campaignApplicants.filter(a => {
+        if (!a.specialty) return false;
+        if (a.specialty === selectedSpecialty) return true;
+        if (specObj && a.specialty.includes(specObj.name)) return true;
+        return false;
+      });
+
+      let originals = 0;
+      let copies = 0;
+      filtered.forEach(a => {
+        if (a.educationDocumentSubmissionType === 'original' || !a.educationDocumentSubmissionType) {
+          originals++;
+        } else {
+          copies++;
+        }
+      });
+
+      return [
+        { name: 'Оригиналы аттестатов', fullName: 'Оригиналы аттестатов', value: originals },
+        { name: 'Копии документов', fullName: 'Копии документов', value: copies }
+      ].filter(item => item.value > 0);
+    }
+  }, [campaignApplicants, selectedSpecialty]);
+
+  // Helper sorting function for applicants
+  const sortApplicantList = (list: Applicant[]) => {
+    const getPrioRank = (a: Applicant) => {
+      if (!a.hasBenefit && (!a.benefit || a.benefit === 'Нет льгот')) return 0;
+      const effect = a.benefitEffect || '';
+      if (effect.includes('Первоочередное') || effect.includes('Вне конкурса') || effect.includes('Целевое')) return 3;
+      if (effect.includes('Преимущественное') || effect.includes('Дополнительные')) return 2;
+      return a.hasBenefit ? 3 : 0;
+    };
+
+    return [...list].sort((a, b) => {
+      const prioA = getPrioRank(a);
+      const prioB = getPrioRank(b);
+      if (prioB !== prioA) return prioB - prioA;
+
+      const scoreA = a.averageScore || 0;
+      const scoreB = b.averageScore || 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      
+      const fivesA = a.grades?.fives || 0;
+      const fivesB = b.grades?.fives || 0;
+      if (fivesB !== fivesA) return fivesB - fivesA;
+
+      const foursA = a.grades?.fours || 0;
+      const foursB = b.grades?.fours || 0;
+      return foursB - foursA;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  };
+
+  // Map calculating exact rank among ORIGINALS for each applicant per specialty
+  const originalsRankMap = useMemo(() => {
+    const map = new Map<string, { rank: number; totalOriginals: number }>();
+
+    // Group all applicants by specialty
+    const specGroups: Record<string, Applicant[]> = {};
+    campaignApplicants.forEach(a => {
+      const specKey = a.specialty || 'Other';
+      if (!specGroups[specKey]) specGroups[specKey] = [];
+      specGroups[specKey].push(a);
+    });
+
+    Object.keys(specGroups).forEach(specKey => {
+      const specApplicants = specGroups[specKey];
+      // Filter only originals and sort them
+      const originalsOnly = sortApplicantList(
+        specApplicants.filter(a => a.educationDocumentSubmissionType === 'original' || !a.educationDocumentSubmissionType)
+      );
+
+      originalsOnly.forEach((app, idx) => {
+        map.set(app.id, { rank: idx + 1, totalOriginals: originalsOnly.length });
+      });
+    });
+
+    return map;
   }, [campaignApplicants]);
 
   // Filtered and sorted list for selected specialty & tab
@@ -146,41 +250,7 @@ export function PublicRatingView() {
       list = list.filter(a => a.educationDocumentSubmissionType === 'original' || !a.educationDocumentSubmissionType);
     }
 
-    // Sort descending:
-    // 1. Applicants with priority enrollment benefit (Первоочередное зачисление / Вне конкурса / Целевое / Льгота) ALWAYS come first
-    // 2. Average score (averageScore) descending
-    // 3. Count of 5s, 4s, 3s
-    const getPrioRank = (a: Applicant) => {
-      if (!a.hasBenefit && (!a.benefit || a.benefit === 'Нет льгот')) return 0;
-      const effect = a.benefitEffect || '';
-      if (effect.includes('Первоочередное') || effect.includes('Вне конкурса') || effect.includes('Целевое')) {
-        return 3;
-      }
-      if (effect.includes('Преимущественное') || effect.includes('Дополнительные')) {
-        return 2;
-      }
-      return a.hasBenefit ? 3 : 0;
-    };
-
-    list.sort((a, b) => {
-      const prioA = getPrioRank(a);
-      const prioB = getPrioRank(b);
-      if (prioB !== prioA) return prioB - prioA;
-
-      const scoreA = a.averageScore || 0;
-      const scoreB = b.averageScore || 0;
-      if (scoreB !== scoreA) return scoreB - scoreA;
-      
-      const fivesA = a.grades?.fives || 0;
-      const fivesB = b.grades?.fives || 0;
-      if (fivesB !== fivesA) return fivesB - fivesA;
-
-      const foursA = a.grades?.fours || 0;
-      const foursB = b.grades?.fours || 0;
-      return foursB - foursA;
-    });
-
-    return list;
+    return sortApplicantList(list);
   }, [campaignApplicants, selectedSpecialty, activeTab]);
 
   // Find target applicant if code search is active
@@ -257,7 +327,7 @@ export function PublicRatingView() {
           </div>
 
           {/* Campaign Dates & Official Info Header Bar */}
-          <div className="mt-6 pt-4 border-t border-white/15 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="mt-6 pt-4 border-t border-white/15 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="bg-white/10 p-3 rounded-xl border border-white/10 flex items-center gap-3">
               <Calendar className="w-5 h-5 text-rose-300 shrink-0" />
               <div>
@@ -281,14 +351,6 @@ export function PublicRatingView() {
                 <div className="font-bold text-white">{campaignApplicants.length} абитуриентов</div>
               </div>
             </div>
-
-            <div className="bg-white/10 p-3 rounded-xl border border-white/10 flex items-center gap-3">
-              <Info className="w-5 h-5 text-blue-300 shrink-0" />
-              <div>
-                <div className="text-[11px] text-rose-200 font-semibold uppercase">Защита данных (152-ФЗ)</div>
-                <div className="font-bold text-emerald-300">ФИО скрыты (Индивидуальные коды)</div>
-              </div>
-            </div>
           </div>
         </div>
       </header>
@@ -304,45 +366,73 @@ export function PublicRatingView() {
             <div className="flex items-center justify-between mb-3 border-b border-stone-100 pb-2.5">
               <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
                 <PieChartIcon className="w-4 h-4 text-rose-800" />
-                <span>Поданные заявления по специальностям</span>
+                <span>
+                  {selectedSpecialty === 'all' 
+                    ? 'Распределение по специальностям' 
+                    : `Документы (${getSpecialtyByFullName(selectedSpecialty)?.code || 'Специальность'})`}
+                </span>
               </h3>
               <span className="text-[11px] font-bold text-rose-900 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
-                Всего: {campaignApplicants.length}
+                Всего: {pieChartData.reduce((acc, curr) => acc + curr.value, 0)}
               </span>
             </div>
 
-            <div className="h-56 w-full flex-1">
+            <div className="w-full">
               {pieChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={75}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      formatter={(val: number) => [`${val} заявл.`, 'Количество']}
-                      contentStyle={{ borderRadius: '12px', fontSize: '12px', border: '1px solid #e7e5e4' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <>
+                  <div className="h-44 sm:h-48 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                        <Pie
+                          data={pieChartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={36}
+                          outerRadius={64}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {pieChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(val: number, _name: string, item: any) => [
+                            `${val} чел.`, 
+                            item?.payload?.fullName || item?.payload?.name || 'Количество'
+                          ]}
+                          contentStyle={{ borderRadius: '12px', fontSize: '12px', border: '1px solid #e7e5e4', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', zIndex: 50 }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Custom Legend Chips */}
+                  <div className="mt-2 flex flex-wrap justify-center gap-1.5 max-h-28 overflow-y-auto pr-1">
+                    {pieChartData.map((item, idx) => (
+                      <div 
+                        key={idx} 
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-stone-50 hover:bg-stone-100 rounded-md border border-stone-200 text-[11px] font-semibold text-stone-700 transition-colors shadow-2xs"
+                        title={item.fullName || item.name}
+                      >
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                        <span className="truncate max-w-[130px] sm:max-w-[160px]">{item.name}</span>
+                        <span className="ml-0.5 text-stone-900 font-bold bg-white px-1.5 py-0.2 rounded border border-stone-200 text-[10px]">
+                          {item.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               ) : (
-                <div className="flex items-center justify-center h-full text-stone-400 text-xs">
+                <div className="flex items-center justify-center h-48 text-stone-400 text-xs">
                   Нет данных для диаграммы
                 </div>
               )}
             </div>
 
-            <div className="mt-2 text-[11px] text-stone-500 text-center">
-              * Нажмите на специальность в фильтрах ниже для детализации конкурса
+            <div className="mt-3 text-[11px] text-stone-400 text-center">
+              * Нажмите или наведите на сегмент для подробностей
             </div>
           </div>
 
@@ -389,10 +479,19 @@ export function PublicRatingView() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {foundRank > 0 && (
                         <span className="text-xs font-black text-white bg-rose-900 px-2.5 py-0.5 rounded-md shadow-2xs">
-                          Позиция в рейтинге: № {foundRank}
+                          Общий рейтинг: № {foundRank}
+                        </span>
+                      )}
+                      {foundApplicant.educationDocumentSubmissionType === 'copy' ? (
+                        <span className="text-xs font-bold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-md border border-amber-300">
+                          По оригиналам: Копия
+                        </span>
+                      ) : (
+                        <span className="text-xs font-black text-emerald-950 bg-emerald-200 px-2.5 py-0.5 rounded-md border border-emerald-400">
+                          Место по оригиналам: № {originalsRankMap.get(foundApplicant.id)?.rank || 1} из {originalsRankMap.get(foundApplicant.id)?.totalOriginals || 1}
                         </span>
                       )}
                       <span className="text-xs font-extrabold text-emerald-900 bg-emerald-200/80 px-2.5 py-0.5 rounded-md">
@@ -581,6 +680,9 @@ export function PublicRatingView() {
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">№ п/п</th>
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">Индивидуальный код</th>
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">Специальность</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider text-emerald-900 bg-emerald-100/50">
+                      Место по оригиналам
+                    </th>
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">Средний балл</th>
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">Оценки (5/4/3)</th>
                     <th className="px-4 py-3.5 text-left text-xs font-bold text-stone-700 uppercase tracking-wider">Документ</th>
@@ -594,6 +696,7 @@ export function PublicRatingView() {
                     const isFound = foundApplicant?.id === item.id;
                     const isOriginal = item.educationDocumentSubmissionType === 'original' || !item.educationDocumentSubmissionType;
                     const isWithinCapacity = rank <= currentCapacity;
+                    const origInfo = originalsRankMap.get(item.id);
 
                     return (
                       <tr 
@@ -643,6 +746,19 @@ export function PublicRatingView() {
                           }`}>
                             {item.fundingType || (item.specialty?.includes('Бюджет') ? 'Бюджет' : 'Платно')}
                           </span>
+                        </td>
+
+                        {/* Position among Originals */}
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                          {isOriginal ? (
+                            <span className="inline-flex items-center gap-1 font-extrabold text-emerald-950 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
+                              № {origInfo?.rank || 1} <span className="text-[10px] text-emerald-800 font-normal">из {origInfo?.totalOriginals || 1}</span>
+                            </span>
+                          ) : (
+                            <span className="text-stone-400 text-xs font-medium">
+                              — (Копия)
+                            </span>
+                          )}
                         </td>
 
                         {/* Average score */}

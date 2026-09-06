@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Campaign, Applicant } from '../types';
-import { exportApplicantsToExcel, exportApplicantsToPDF } from '../utils/reportExporter';
-import { formatSpecialtyDisplay } from '../lib/specialties';
-import { X, FileText, Printer, Download, BarChart3, Users, Award, Shield, CheckCircle2, Building, Calendar, Layers } from 'lucide-react';
+import { exportApplicantsToExcel, exportApplicantsToPDF, exportEnrollmentOrderToPDF, exportEnrollmentOrderToDocx } from '../utils/reportExporter';
+import { SPECIALTY_LIST, formatSpecialtyDisplay } from '../lib/specialties';
+import { X, FileText, Printer, Download, BarChart3, Users, Award, Shield, CheckCircle2, Building, Calendar, Layers, Filter, FileCheck } from 'lucide-react';
 
 interface ReportsModalProps {
   isOpen: boolean;
@@ -17,8 +17,14 @@ export function ReportsModal({
   campaign,
   applicants
 }: ReportsModalProps) {
-  const [activeTab, setActiveTab] = useState<'summary' | 'specialties' | 'benefits' | 'export'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'specialties' | 'benefits' | 'enrollment' | 'export'>('summary');
   const [isExporting, setIsExporting] = useState(false);
+
+  // Фильтры экспорта
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedSpecialtyFilter, setSelectedSpecialtyFilter] = useState<string>('all');
+  const [reportType, setReportType] = useState<'general' | 'enrollment_order'>('general');
 
   React.useEffect(() => {
     if (isOpen) {
@@ -30,6 +36,35 @@ export function ReportsModal({
       document.body.style.overflow = '';
     };
   }, [isOpen]);
+
+  // Фильтрация абитуриентов по датам и специальности
+  const filteredApplicants = useMemo(() => {
+    return applicants.filter(a => {
+      // 1. Фильтр по специальности
+      if (selectedSpecialtyFilter !== 'all') {
+        const matchesCode = a.specialtyCode === selectedSpecialtyFilter;
+        const matchesSpec = a.specialty === selectedSpecialtyFilter;
+        if (!matchesCode && !matchesSpec) return false;
+      }
+
+      // 2. Фильтр по дате создания
+      if (a.createdAt) {
+        const appDate = new Date(a.createdAt);
+        if (startDate) {
+          const start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+          if (appDate < start) return false;
+        }
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          if (appDate > end) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [applicants, selectedSpecialtyFilter, startDate, endDate]);
 
   if (!isOpen) return null;
 
@@ -69,13 +104,19 @@ export function ReportsModal({
   });
 
   const handlePrint = () => {
-    exportApplicantsToPDF(campaign?.name || 'Приёмная кампания', applicants);
+    const title = campaign?.name || 'Приёмная кампания';
+    if (reportType === 'enrollment_order') {
+      exportEnrollmentOrderToPDF(title, filteredApplicants, selectedSpecialtyFilter);
+    } else {
+      exportApplicantsToPDF(title, filteredApplicants);
+    }
   };
 
   const handleExportExcel = async () => {
     setIsExporting(true);
     try {
-      await exportApplicantsToExcel(campaign?.name || 'Приёмная кампания', applicants);
+      const title = campaign?.name || 'Приёмная кампания';
+      await exportApplicantsToExcel(title, filteredApplicants);
     } finally {
       setIsExporting(false);
     }
@@ -150,6 +191,20 @@ export function ReportsModal({
           >
             <Shield className="w-4 h-4" />
             <span>Льготы и квоты</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('enrollment')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative ${
+              activeTab === 'enrollment'
+                ? 'bg-rose-900 text-white shadow-sm'
+                : 'bg-white text-stone-700 hover:bg-stone-200/60 border border-stone-200'
+            }`}
+          >
+            <FileCheck className="w-4 h-4 text-emerald-600" />
+            <span>Приказ на зачисление</span>
+            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200">
+              {applicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length}
+            </span>
           </button>
           <button
             onClick={() => setActiveTab('export')}
@@ -303,26 +358,247 @@ export function ReportsModal({
             </div>
           )}
 
-          {/* TAB 4: EXPORT */}
+          {/* TAB: ENROLLMENT ORDER */}
+          {activeTab === 'enrollment' && (
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-stone-100">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-widest text-emerald-700">Официальное зачисление</span>
+                    <h4 className="text-xl font-bold text-stone-900 mt-0.5">Формирование приказа о зачислении</h4>
+                    <p className="text-xs text-stone-500 mt-1 max-w-2xl">
+                      В приказ включаются только абитуриенты, предоставившие <strong>оригинал документа об образовании</strong> и прошедшие конкурс аттестатов. Документ формируется с разбивкой по специальностям.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => exportEnrollmentOrderToPDF(campaign?.name || 'Приёмная кампания', filteredApplicants, selectedSpecialtyFilter)}
+                      disabled={filteredApplicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length === 0}
+                      className="px-4 py-2.5 bg-rose-900 hover:bg-rose-950 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span>Печать / PDF Приказ</span>
+                    </button>
+                    <button
+                      onClick={() => exportEnrollmentOrderToDocx(campaign?.name || 'Приёмная кампания', filteredApplicants, selectedSpecialtyFilter)}
+                      disabled={filteredApplicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length === 0}
+                      className="px-4 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Скачать Word (.docx)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and stats */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-emerald-800">К зачислению (с оригиналами)</div>
+                      <div className="text-2xl font-black text-emerald-950 mt-1">
+                        {applicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length} чел.
+                      </div>
+                    </div>
+                    <CheckCircle2 className="w-8 h-8 text-emerald-600 opacity-80" />
+                  </div>
+
+                  <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-amber-800">Подано копий (в резерве)</div>
+                      <div className="text-2xl font-black text-amber-950 mt-1">
+                        {applicants.filter(a => a.educationDocumentSubmissionType === 'copy').length} чел.
+                      </div>
+                    </div>
+                    <FileText className="w-8 h-8 text-amber-600 opacity-80" />
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-stone-600">Всего абитуриентов в базе</div>
+                      <div className="text-2xl font-black text-stone-900 mt-1">
+                        {applicants.length} чел.
+                      </div>
+                    </div>
+                    <Users className="w-8 h-8 text-stone-400 opacity-80" />
+                  </div>
+                </div>
+
+                {/* Specialty Filter for Order */}
+                <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between gap-4 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-stone-800">
+                    <Filter className="w-4 h-4 text-rose-800" />
+                    <span>Специальность для приказа:</span>
+                  </div>
+                  <select
+                    value={selectedSpecialtyFilter}
+                    onChange={(e) => setSelectedSpecialtyFilter(e.target.value)}
+                    className="px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-medium text-stone-900 focus:outline-none"
+                  >
+                    <option value="all">Все специальности (Полный приказ)</option>
+                    {SPECIALTY_LIST.map(s => (
+                      <option key={s.id} value={s.fullName}>
+                        {s.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Table of Enrolled Candidates */}
+                <div>
+                  <h5 className="font-bold text-stone-900 text-sm mb-3">
+                    Список абитуриентов с оригиналами документов (Включаются в приказ):
+                  </h5>
+                  <div className="border border-stone-200 rounded-xl overflow-hidden bg-white max-h-80 overflow-y-auto">
+                    <table className="w-full text-xs text-left text-stone-700">
+                      <thead className="bg-stone-100 text-stone-800 font-bold border-b border-stone-200 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-center w-10">№</th>
+                          <th className="px-3 py-2">ФИО Абитуриента</th>
+                          <th className="px-3 py-2 text-center">СНИЛС</th>
+                          <th className="px-3 py-2">Специальность</th>
+                          <th className="px-3 py-2 text-center">Ср. балл</th>
+                          <th className="px-3 py-2 text-center">Основание</th>
+                          <th className="px-3 py-2 text-center">Документ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {filteredApplicants
+                          .filter(a => a.educationDocumentSubmissionType !== 'copy')
+                          .sort((a, b) => (b.averageScore || 0) - (a.averageScore || 0))
+                          .map((a, idx) => (
+                            <tr key={a.id || idx} className="hover:bg-stone-50">
+                              <td className="px-3 py-2 text-center font-bold text-stone-900">{idx + 1}</td>
+                              <td className="px-3 py-2 font-semibold text-stone-900">{a.fullName}</td>
+                              <td className="px-3 py-2 text-center text-stone-600">{a.snils || '—'}</td>
+                              <td className="px-3 py-2 font-medium">{formatSpecialtyDisplay(a.specialty, a.specialtyName)}</td>
+                              <td className="px-3 py-2 text-center font-bold text-rose-900 bg-rose-50/50">{a.averageScore?.toFixed(2) || '0.00'}</td>
+                              <td className="px-3 py-2 text-center">{a.fundingType || 'Бюджет'}</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  Оригинал
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        {filteredApplicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-3 py-8 text-center text-stone-400">
+                              Нет абитуриентов с оригиналами документов для включения в приказ
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: EXPORT */}
           {activeTab === 'export' && (
             <div className="space-y-6">
-              <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
+              <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-6">
                 <div>
-                  <h4 className="font-bold text-stone-900">Выгрузка и экспорт отчётной документации</h4>
+                  <h4 className="font-bold text-stone-900 text-base">Конструктор и экспорт отчётной документации</h4>
                   <p className="text-xs text-stone-500 mt-0.5">
-                    Скачайте официальный табличный отчёт в формате Microsoft Excel (.xlsx) с оформленными цветными шапками и автоподбором колонок, либо сохраните печатную PDF-версию.
+                    Выберите тип отчёта, задайте период подачи и отфильтруйте базу по конкретной специальности при необходимости.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                {/* 1. Настройка параметров отчета */}
+                <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-4 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-stone-800 text-sm pb-2 border-b border-stone-200">
+                    <Filter className="w-4 h-4 text-rose-800" />
+                    <span>Параметры и фильтры выгрузки</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Вид отчета */}
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">Вид формируемого отчёта / документа:</label>
+                      <select
+                        value={reportType}
+                        onChange={(e) => setReportType(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-800/20"
+                      >
+                        <option value="general">Сводная база (Группировка по специальностям)</option>
+                        <option value="enrollment_order">Приказ на зачисление (Только с оригиналами)</option>
+                      </select>
+                    </div>
+
+                    {/* Фильтр по специальности */}
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">Выбор специальности / базы:</label>
+                      <select
+                        value={selectedSpecialtyFilter}
+                        onChange={(e) => setSelectedSpecialtyFilter(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-800/20"
+                      >
+                        <option value="all">Все специальности (Общая база)</option>
+                        {SPECIALTY_LIST.map(s => (
+                          <option key={s.id} value={s.fullName}>
+                            {s.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Период с */}
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">Период подачи заявления — С:</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-800/20"
+                      />
+                    </div>
+
+                    {/* Период по */}
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">Период подачи заявления — ПО:</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-medium text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-800/20"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Инфо-панель о фильтрации */}
+                  <div className="pt-2 flex items-center justify-between text-xs border-t border-stone-200/80">
+                    <span className="text-stone-600 font-medium">
+                      Результат фильтрации: <strong className="text-stone-900">{filteredApplicants.length} чел.</strong> из {applicants.length} в общей базе
+                    </span>
+                    {(startDate || endDate || selectedSpecialtyFilter !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartDate('');
+                          setEndDate('');
+                          setSelectedSpecialtyFilter('all');
+                        }}
+                        className="text-rose-800 hover:text-rose-950 underline font-bold cursor-pointer"
+                      >
+                        Сбросить фильтры
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Кнопки действия */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
                   <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 flex flex-col justify-between space-y-3">
                     <div>
                       <h5 className="font-bold text-emerald-950 text-sm">Таблица Excel (.xlsx)</h5>
-                      <p className="text-xs text-emerald-800 mt-0.5">Красивое форматирование, цветные заголовки, точно настроенные колонки</p>
+                      <p className="text-xs text-emerald-800 mt-0.5">Группировка по специальностям, цветные шапки, подытоги и средние баллы</p>
                     </div>
                     <button
                       onClick={handleExportExcel}
-                      disabled={isExporting}
+                      disabled={isExporting || filteredApplicants.length === 0}
                       className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <Download className="w-4 h-4" />
@@ -332,15 +608,35 @@ export function ReportsModal({
 
                   <div className="p-4 rounded-xl border border-stone-200 bg-stone-50 flex flex-col justify-between space-y-3">
                     <div>
-                      <h5 className="font-bold text-stone-900 text-sm">Печать / Сохранение PDF</h5>
-                      <p className="text-xs text-stone-500 mt-0.5">Форматированная печать официального бланка реестра</p>
+                      <h5 className="font-bold text-stone-900 text-sm">
+                        {reportType === 'enrollment_order' ? 'Приказ на зачисление (PDF)' : 'Сводный реестр (PDF)'}
+                      </h5>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        {reportType === 'enrollment_order' ? 'Печатный бланка приказа с оригиналами' : 'Печатный бланк сводного реестра по специальностям'}
+                      </p>
                     </div>
                     <button
                       onClick={handlePrint}
-                      className="w-full py-2.5 bg-rose-900 hover:bg-rose-950 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      disabled={filteredApplicants.length === 0}
+                      className="w-full py-2.5 bg-rose-900 hover:bg-rose-950 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>Печать / PDF</span>
+                      <span>{reportType === 'enrollment_order' ? 'Сформировать приказ (PDF)' : 'Печать / PDF'}</span>
+                    </button>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 flex flex-col justify-between space-y-3">
+                    <div>
+                      <h5 className="font-bold text-blue-950 text-sm">Приказ на зачисление (Word .docx)</h5>
+                      <p className="text-xs text-blue-800 mt-0.5">Редактируемый документ Word с зачисленными абитуриентами (оригиналы)</p>
+                    </div>
+                    <button
+                      onClick={() => exportEnrollmentOrderToDocx(campaign?.name || 'Приёмная кампания', filteredApplicants, selectedSpecialtyFilter)}
+                      disabled={filteredApplicants.filter(a => a.educationDocumentSubmissionType !== 'copy').length === 0}
+                      className="w-full py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Скачать Приказ (.docx)</span>
                     </button>
                   </div>
                 </div>

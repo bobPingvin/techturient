@@ -45,6 +45,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     uploadSuccess: false,
   });
 
+  const [enrollmentOrderStatus, setEnrollmentOrderStatus] = useState<TemplateState>({
+    hasCustom: false,
+    updatedAt: null,
+    fileName: null,
+    isUploading: false,
+    uploadSuccess: false,
+  });
+
   useEffect(() => {
     if (isOpen) {
       loadTemplateStatuses();
@@ -68,6 +76,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     await loadSingleTemplateStatus(
       'parentalConsentTemplate',
       setParentalConsentStatus
+    );
+
+    // 4. Приказ на зачисление
+    await loadSingleTemplateStatus(
+      'enrollmentOrderTemplate',
+      setEnrollmentOrderStatus
     );
   };
 
@@ -432,6 +446,103 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   };
 
+  // =========================================================================
+  // СКАЧИВАНИЕ И ЗАГРУЗКА: Приказ на зачисление
+  // =========================================================================
+  const handleDownloadActiveEnrollmentOrder = async () => {
+    try {
+      const customBase64 = localStorage.getItem('enrollmentOrderTemplate_base64');
+      const customFileName = localStorage.getItem('enrollmentOrderTemplate_fileName') || 'enrollmentOrder_custom_template.docx';
+
+      if (customBase64) {
+        downloadBase64File(customBase64, customFileName);
+        return;
+      }
+      await handleDownloadSampleEnrollmentOrder();
+    } catch (e) {
+      console.error('Error downloading active enrollment order template:', e);
+      alert('Не удалось скачать шаблон приказа на зачисление');
+    }
+  };
+
+  const handleDownloadSampleEnrollmentOrder = async () => {
+    try {
+      const doc = new Document({
+        sections: [
+          {
+            properties: {},
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    text: 'ПРИКАЗ № _____-К',
+                    bold: true,
+                    size: 28,
+                    font: 'Times New Roman',
+                  }),
+                ],
+                spacing: { after: 150 },
+              }),
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    text: 'О зачислении абитуриентов в число студентов ГБПОУ НСО "НЭК"',
+                    bold: true,
+                    size: 24,
+                    font: 'Times New Roman',
+                  }),
+                ],
+                spacing: { after: 300 },
+              }),
+              new Paragraph({
+                alignment: AlignmentType.BOTH,
+                children: [
+                  new TextRun({
+                    text: 'На основании решения приёмной комиссии и предоставленных оригиналов документов об образовании, в рамках приёмной кампании "{campaignName}" от {currentDate} г. ПРИКАЗЫВАЮ:\n\n1. Зачислить с 1 сентября 2026 года на 1 курс очной формы обучения следующих абитуриентов:',
+                    size: 22,
+                    font: 'Times New Roman',
+                  }),
+                ],
+                spacing: { after: 300 },
+              }),
+              new Paragraph({
+                alignment: AlignmentType.LEFT,
+                children: [
+                  new TextRun({
+                    text: 'Специальность / Профессия: {specialtyName}\nОснование: {fundingType}\n\n{enrolledListFormatted}',
+                    size: 22,
+                    font: 'Times New Roman',
+                  }),
+                ],
+                spacing: { after: 400 },
+              }),
+              new Paragraph({
+                alignment: AlignmentType.BOTH,
+                children: [
+                  new TextRun({
+                    text: 'Директор ГБПОУ НСО "НЭК"                        _________________ / Дронь В.В. /',
+                    bold: true,
+                    size: 22,
+                    font: 'Times New Roman',
+                  }),
+                ],
+                spacing: { after: 100 },
+              }),
+            ],
+          },
+        ],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, 'enrollmentOrder_sample_template.docx');
+    } catch (e) {
+      console.error('Error creating sample enrollment order template:', e);
+      alert('Не удалось скачать образец приказа на зачисление');
+    }
+  };
+
   // Helper для скачивания base64
   const downloadBase64File = (base64: string, fileName: string) => {
     const binaryString = atob(base64);
@@ -447,7 +558,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // УНИВЕРСАЛЬНАЯ ЗАГРУЗКА
   const handleUploadTemplate = (
     e: React.ChangeEvent<HTMLInputElement>,
-    templateKey: 'enrollAppTemplate' | 'dataProcessingConsentTemplate' | 'parentalConsentTemplate',
+    templateKey: 'enrollAppTemplate' | 'dataProcessingConsentTemplate' | 'parentalConsentTemplate' | 'enrollmentOrderTemplate',
     templateTitle: string,
     setStatus: React.Dispatch<React.SetStateAction<TemplateState>>
   ) => {
@@ -846,6 +957,94 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-[11px] text-amber-800 font-medium italic pt-1 border-t border-stone-200">
                     * Внимание: Переменные для данных родителей отсутствуют. Данные родителя (ФИО, паспорт) оформляются в шаблоне физическими линиями прочерков (______) для заполнения родителем исключительно от руки.
                   </p>
+                </div>
+              </div>
+
+              {/* КАРТОЧКА 4: Приказ на зачисление */}
+              <div className="border border-stone-200 rounded-2xl p-5 bg-white shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-stone-900 text-base flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-rose-700" />
+                      4. Приказ на зачисление (enrollmentOrder.docx)
+                    </h4>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      Официальный шаблон распорядительного документа о зачислении рекомендованных абитуриентов с оригиналами.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadActiveEnrollmentOrder}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                      title="Скачать текущий активный шаблон приказа"
+                    >
+                      <Download className="w-4 h-4 text-white" />
+                      Скачать шаблон
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleEnrollmentOrder}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-stone-300"
+                      title="Скачать образец приказа с тегами"
+                    >
+                      Скачать образец
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-stone-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    {enrollmentOrderStatus.hasCustom ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Пользовательский шаблон сохранён {enrollmentOrderStatus.updatedAt ? `(${enrollmentOrderStatus.updatedAt})` : ''}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-stone-600 font-medium bg-stone-100 px-2.5 py-1 rounded-full border border-stone-200">
+                        Используется стандартный встроенный шаблон
+                      </span>
+                    )}
+                  </div>
+
+                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl font-bold transition-colors cursor-pointer shadow-xs text-xs">
+                    {enrollmentOrderStatus.isUploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Сохранение...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        Загрузить свой шаблон (.docx)
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".docx"
+                      onChange={(e) => handleUploadTemplate(e, 'enrollmentOrderTemplate', 'Шаблон приказа на зачисление', setEnrollmentOrderStatus)}
+                      className="hidden"
+                      disabled={enrollmentOrderStatus.isUploading}
+                    />
+                  </label>
+                </div>
+
+                {enrollmentOrderStatus.uploadSuccess && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Шаблон приказа на зачисление успешно сохранён и активен!
+                  </div>
+                )}
+
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-600 space-y-1">
+                  <p className="font-bold text-stone-800 mb-1">Переменные шаблона приказа на зачисление:</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 font-mono text-[11px]">
+                    <div>{`{campaignName}`} — Название кампания</div>
+                    <div>{`{currentDate}`} — Дата приказа</div>
+                    <div>{`{specialtyName}`} — Наименование специальности</div>
+                    <div>{`{fundingType}`} — Форма финансирования</div>
+                    <div>{`{enrolledListFormatted}`} — Список зачисленных</div>
+                  </div>
                 </div>
               </div>
 
